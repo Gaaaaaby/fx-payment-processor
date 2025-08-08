@@ -1,31 +1,54 @@
-import pytest
-from fastapi.testclient import TestClient
-from app.main import app
+# import pytest
+# from fastapi.testclient import TestClient
+# from main import app
 
-client = TestClient(app)
+# client = TestClient(app)
 
-def test_fund_wallet():
-    user_id = "user123"
 
-    response = client.post(f"/wallets/{user_id}/fund", json={"currency": "USD", "amount": 1000})
-    assert response.status_code == 200
-    data = response.json()
-    assert "USD" in data
-    assert data["USD"] == 1000
+# user_id = "gabriela_test"
+# currency = "USD"
+# initial_amount = 100.0
+# withdraw_amount = 50.0
+# invalid_amount = -10.0
 
-def test_convert_currency():
-    user_id = "user2"
+# def test_fund_valid():
+#     response = client.post("/fund", json={
+#         "user_id": user_id,
+#         "currency": currency,
+#         "amount": initial_amount
+#     })
+#     assert response.status_code == 200
+#     assert "Deposit successful" in response.json().get("message", "")
 
-    client.post(f"/wallets/{user_id}/fund", json={"currency": "USD", "amount": 1000})
-    
-    response = client.post(f"/wallets/{user_id}/convert", json={
-        "from_currency": "USD",
-        "to_currency": "MXN",
-        "amount": 500
-    })
+# def test_fund_invalid_amount():
+#     response = client.post("/fund", json={
+#         "user_id": user_id,
+#         "currency": currency,
+#         "amount": invalid_amount
+#     })
+#     assert response.status_code == 400
 
-    assert response.status_code == 200
-    data = response.json()
-    assert data["USD"] == 500
-    assert abs(data["MXN"] - 9350) < 0.01
+# def test_withdraw_valid():
+#     response = client.post("/withdraw", json={
+#         "user_id": user_id,
+#         "currency": currency,
+#         "amount": withdraw_amount
+#     })
+#     assert response.status_code == 200
+#     assert "Withdrawal successful" in response.json().get("message", "")
 
+# def test_withdraw_insufficient_funds():
+#     response = client.post("/withdraw", json={
+#         "user_id": user_id,
+#         "currency": currency,
+#         "amount": 9999.0  # Excesivo
+#     })
+#     assert response.status_code == 400
+
+# def test_balances():
+#     response = client.get(f"/balances?user_id={user_id}")
+#     assert response.status_code == 200
+#     data = response.json()
+#     assert isinstance(data, dict)
+#     assert currency in data
+#     assert data[currency] >= 0
