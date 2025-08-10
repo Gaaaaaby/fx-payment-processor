@@ -2,6 +2,9 @@
 
 **FX Payment Processor** es un prototipo de procesador de pagos multi-moneda. Permite la gestión de wallets en distintas divisas, realiza conversiones entre ellas y ofrece funciones básicas como depósito, retiro de fondos y consulta de balances.
 
+# Branches
+-main: with the tests and functional endpoints 
+-gaby_test: for testing only 
 
 ## Tecnologías utilizadas
 
