@@ -1,15 +1,51 @@
+
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel
+from typing import Optional
+from sqlalchemy import create_engine, Column, String, Integer, Float, ForeignKey, UniqueConstraint
+from sqlalchemy.orm import sessionmaker, Session, declarative_base, relationship
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
+
+DATABASE_URL = "sqlite:///./wallets.db"
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
 app = FastAPI()
 
+class User(Base):
+    __tablename__ = "users"
+    id = Column(String, primary_key=True, index=True)
+    wallets = relationship("Wallet", back_populates="user", cascade="all, delete-orphan")
 
-wallets = {}
+class Wallet(Base):
+    __tablename__ = "wallets"
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(String, ForeignKey("users.id"))
+    currency = Column(String)
+    balance = Column(Float, default=0.0)
+    user = relationship("User", back_populates="wallets")
+    __table_args__ = (UniqueConstraint('user_id', 'currency', name='_user_currency_uc'),)
 
-FX_RATES = {
-    ("USD", "MXN"): 18.7,
-    ("MXN", "USD"): 0.053,
-}
+class ExchangeRate(Base):
+    __tablename__ = "exchange_rates"
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    currency_from = Column(String(3), index=True, nullable=False)
+    currency_to = Column(String(3), index=True, nullable=False)
+    rate = Column(Float, nullable=False)
+
+    __table_args__ = (UniqueConstraint("currency_from", "currency_to", name="_currency_pair_uc"),)
+
+Base.metadata.create_all(bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 class FundPayload(BaseModel):
     currency: str
@@ -23,39 +59,98 @@ class ConvertPayload(BaseModel):
 class WithdrawPayload(BaseModel):
     currency: str
     amount: float
+    wallet_id: str
 
 class FundResult(BaseModel):
     currency: str
     amount_funded: float
 
-def supported_currency(currency: str):
-    supported = set()
-    for pair in FX_RATES.keys():
-        supported.update(pair)
-    if currency not in supported:
-        raise HTTPException(status_code=400, detail="Currency not supported.")
+class BalanceResult(BaseModel):
+    user_id: str
+    balance: float
 
-def check_user_id(user_id):
-    if user_id not in wallets:
-        print('The user wasnt found.')
-        return False, None
-    return True, wallets[user_id]
-    
+class WithdrawResult(BaseModel):
+    balance: float
+    amount: float
+    wallet_id: str
+
+
+@app.get("/users/{user_id}", status_code=201)
+def get_user(user_id: str, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail=f"The User {user_id} wasnt found.")
+
 @app.post("/wallets/{user_id}/fund", response_model=FundResult)
-def fund_wallet(user_id: str, payload: FundPayload):
+def fund_wallet(user_id: str, payload: FundPayload, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail=f"The User {user_id} wasnt found.")
+    
     currency = payload.currency.upper()
-    available_currencies = supported_currency(currency)
-    created, user_wallet = check_user_id(user_id)
-    if not created:
-        print(f"User '{user_id}' not found. Creating new user...")
-        wallets[user_id] = {}
-        user_wallet = wallets[user_id]
-        if currency not in user_wallet:
-            user_wallet[currency] = 0.0
-        
+    currency_result = db.query(ExchangeRate).filter(ExchangeRate.currency_from == currency).all()
+    if not currency_result:
+        raise HTTPException(status_code=400, detail=f"The currency isnt available")
+    
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="The amount entered is not correct.")
+    
+    wallet = db.query(Wallet).filter(Wallet.user_id == user_id, Wallet.currency == currency).first()
+    if wallet:
+        wallet.balance += payload.amount
+    else:
+        
+        wallet = Wallet(user_id=user_id, currency=currency, balance=payload.amount)
+        db.add(wallet)
 
-    user_wallet[currency] += payload.amount
+    db.commit()
+    db.refresh(wallet)
     return FundResult(currency=currency, amount_funded=payload.amount)
+
+# """ @app.post("/wallets/{user_id}/convert")
+# def convert(user_id: str, payload: ConvertPayload):
+#     #created, user_wallet = check_user_id(user_id)
+#     if not created:
+#         raise HTTPException(status_code=404, detail="The wallet with the user id: {user_id} wasnt found.")
+#     else:
+#         payload.from_currency.upper()
+
+
+
+    
+
+@app.post("/wallets/{user_id}/withdraw")
+def withdraw(user_id: str, payload: WithdrawPayload, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail=f"The User {user_id} wasnt found.")
+    wallet = db.query(Wallet).filter(Wallet.user_id == user_id, Wallet.id == payload.wallet_id).first()
+    if not wallet:
+        raise HTTPException(status_code=400, detail=f"The Wallet with the id {payload.wallet_id} from user {user_id} not found.")
+    
+    curr = payload.currency.upper()
+    amount = payload.amount
+
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    if wallet.balance < amount:
+        raise HTTPException(status_code=400, detail="Insufficient funds")
+
+    wallet.balance -= amount
+    db.commit()
+    db.refresh(wallet)
+    return WithdrawResult(balance=wallet.balance, amount=payload.amount, wallet_id=payload.wallet_id)
+
+
+@app.get("/wallets/{user_id}/balances")
+def get_balances(user_id: str, wallet_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail=f"The User {user_id} wasnt found.")
+    else:
+        wallet = db.query(Wallet).filter(Wallet.user_id == user_id, Wallet.id == wallet_id).first()
+        if not wallet:
+            raise HTTPException(status_code=400, detail=f"The Wallet with the id {wallet_id} for user {user_id} not found.")
+        
+    return BalanceResult(user_id=user_id, wallet_id=wallet_id, balance=wallet.balance)
 

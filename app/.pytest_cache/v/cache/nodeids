@@ -1,0 +1,6 @@
+[
+  "tests/test_wallet.py::test_convert_currency",
+  "tests/test_wallet.py::test_fund_wallet",
+  "tests/test_wallet.py::test_show_balance",
+  "tests/test_wallet.py::test_withdraw_funds"
+]
